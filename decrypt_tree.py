@@ -9,14 +9,14 @@ decrypt_tree.py -- offline, standalone decryption of a whole Boxcryptor 2.x tree
     python3 -I decrypt_tree.py [options] <ENCRYPTED_ROOT_DIR>      # any Python 3.10+ with `cryptography`
     uv run decrypt_tree.py [options] <ENCRYPTED_ROOT_DIR>          # or let uv read the inline metadata above
 
-Defaults: `key.bckey` (and optionally `pass.txt`) are looked up in the current directory, then next to this
-script.  Without a password file the password is prompted for (never echoed).
+Defaults: `key.bckey` is looked up in the current directory, then next to this script.  The password is
+prompted for (never echoed) unless a file is given with --password-file.
 Output goes to a SIBLING of ENCRYPTED_ROOT_DIR named with the decrypted folder name
 (e.g.  .../倐姁宸壮凕娗吓墭塽堦䃸/  ->  .../My Backup/), unless --dest-parent is given.
 
 Options:
   --key FILE             key export (.bckey)                 [./key.bckey or <script dir>/key.bckey]
-  --password-file FILE   plaintext password, one line        [./pass.txt if present, else prompt]
+  --password-file FILE   read the password from this file (first line) instead of prompting
   --dest-parent DIR      where to create the decrypted root  [parent of ENCRYPTED_ROOT_DIR]
   --workers N            parallel content-decryption processes [number of CPUs]
   --dry-run              only resolve names and print the plan; write nothing
@@ -372,16 +372,14 @@ class Log:
             self.bar_shown = False
 
 
-def find_default(name, explicit, required=True):
+def find_default(name, explicit):
     if explicit:
         return explicit
     for d in (os.getcwd(), os.path.dirname(os.path.abspath(__file__))):
         p = os.path.join(d, name)
         if os.path.isfile(p):
             return p
-    if required:
-        sys.exit("cannot find %s (use the matching option)" % name)
-    return None
+    sys.exit("cannot find %s (use the matching option)" % name)
 
 
 def fmt(n):
@@ -411,10 +409,9 @@ def main():
     if not os.path.isdir(src_root):
         sys.exit("not a directory: %s" % src_root)
     user = load_user(find_default("key.bckey", a.key))
-    pw_path = find_default("pass.txt", a.password_file, required=False)
-    if pw_path:
-        with open(pw_path, encoding="utf-8") as f:
-            password = f.read().rstrip("\r\n")
+    if a.password_file:
+        with open(a.password_file, encoding="utf-8") as f:
+            password = f.readline().rstrip("\r\n")
     else:
         password = getpass.getpass("Boxcryptor account password: ")
     priv, fn_key = unwrap_user_keys(user, password)

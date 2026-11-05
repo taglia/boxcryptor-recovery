@@ -40,8 +40,9 @@ data itself:
 
 - Keep `key.bckey` **in the same directory as the encrypted folder**, on the same encrypted disk or share,
   with restrictive permissions (`chmod 600 key.bckey`). The tool looks for it in the current directory.
-- Prefer typing the password when prompted. If you must script it, put it alone in a file called `pass.txt`
-  next to the key, `chmod 600`, and delete it afterwards.
+- Prefer typing the password when prompted. If you must script it, put it alone on the first line of a file
+  with restrictive permissions (`chmod 600`), pass that file with `--password-file`, and delete it afterwards.
+  The tool never looks for a password file on its own.
 - **Never put the key, the password or the data inside a copy of this repository.** Keep the repository (or
   just the script) somewhere else and run it *from* the data directory, as shown below. This matters most
   with Nix: `nix develop` or `nix run .` on a local directory copies that whole directory into `/nix/store`,
@@ -106,7 +107,7 @@ an interrupted run can simply be restarted. Options:
 | Option | Meaning |
 |---|---|
 | `--key FILE` | key export (default: `./key.bckey`) |
-| `--password-file FILE` | password file (default: `./pass.txt` if present, else prompt) |
+| `--password-file FILE` | read the password from the first line of this file instead of prompting |
 | `--dest-parent DIR` | create the decrypted root here instead of next to the source |
 | `--workers N` | parallel decryption processes (default: CPU count) |
 | `--dry-run` | print the plan, write nothing |

@@ -14,7 +14,7 @@
     in {
       packages = forAll (pkgs: { default = runner pkgs; });
 
-      # From the directory that holds key.bckey (and optionally pass.txt):
+      # From the directory that holds key.bckey (the password is prompted for, or given with --password-file):
       #   nix run github:<you>/boxcryptor-recovery -- --dry-run '<encrypted root dir>'
       apps = forAll (pkgs: {
         default = { type = "app"; program = "${runner pkgs}/bin/boxcryptor-recovery"; };

@@ -146,7 +146,7 @@ class TreeTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def run_tool(self, *args):
-        return subprocess.run([sys.executable, "-I", SCRIPT, *args, self.root], cwd=self.tmp,
+        return subprocess.run([sys.executable, "-I", SCRIPT, "--password-file", "pass.txt", *args, self.root], cwd=self.tmp,
                               capture_output=True, text=True, timeout=300)
 
     def test_dry_run_writes_nothing(self):
