@@ -1,0 +1,13 @@
+# Never commit key material or encrypted/decrypted data
+*.bckey
+pass.txt
+*.bc
+*.bch
+input/
+out/
+# Nix / Python artefacts
+result
+result-*
+.direnv/
+__pycache__/
+*.pyc
