@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["cryptography>=41"]
+# ///
 """
 decrypt_tree.py -- offline, standalone decryption of a whole Boxcryptor 2.x tree (contents AND names).
 
-    python3 -I decrypt_tree.py [options] <ENCRYPTED_ROOT_DIR>
+    python3 -I decrypt_tree.py [options] <ENCRYPTED_ROOT_DIR>      # any Python 3.10+ with `cryptography`
+    uv run decrypt_tree.py [options] <ENCRYPTED_ROOT_DIR>          # or let uv read the inline metadata above
 
 Defaults: `key.bckey` (and optionally `pass.txt`) are looked up in the current directory, then next to this
 script.  Without a password file the password is prompted for (never echoed).

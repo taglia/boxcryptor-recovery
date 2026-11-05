@@ -26,7 +26,9 @@ against real data, plus one script that walks an encrypted tree and writes a pla
 2. **Your Boxcryptor account password.** It is used to derive the key that unlocks the export.
 3. **The encrypted folder.** A Boxcryptor 2.x tree: files ending in `.bc`, folders containing a
    `FolderKey.bch`, and, if filename encryption was on, names such as `倐嚵厪克峗哌䂶`.
-4. **Nix** (with flakes), or any Python 3.10+ with the [`cryptography`](https://cryptography.io) package.
+4. **Python 3.10 or newer** with the [`cryptography`](https://cryptography.io) package. That is the only
+   dependency. The [Usage](#usage) section shows three equivalent ways to get it: `uv`, a plain virtual
+   environment, or Nix. Pick whichever you already have; any one of them is sufficient.
 
 Supported: one user (no groups or organisation keys), AES-256-CBC files, filename encryption on or off.
 The tool refuses to run on an export with more than one user rather than guess.
@@ -40,29 +42,63 @@ data itself:
   with restrictive permissions (`chmod 600 key.bckey`). The tool looks for it in the current directory.
 - Prefer typing the password when prompted. If you must script it, put it alone in a file called `pass.txt`
   next to the key, `chmod 600`, and delete it afterwards.
-- **Never put the key, the password or the data inside a copy of this repository**, and never run `nix develop`
-  or `nix run .` from a directory that contains them: a path flake is copied into `/nix/store`, which is
-  world-readable. Run the tool *from* the data directory and point it at the repository, as shown below.
+- **Never put the key, the password or the data inside a copy of this repository.** Keep the repository (or
+  just the script) somewhere else and run it *from* the data directory, as shown below. This matters most
+  with Nix: `nix develop` or `nix run .` on a local directory copies that whole directory into `/nix/store`,
+  which is world-readable.
 - The tool never prints or logs the password, private key or any derived key. The log in the output directory
   contains only file names, sizes and SHA-256 prefixes of the decrypted files.
 
 ## Usage
 
-From the directory that holds `key.bckey` and the encrypted folder:
+The tool is a single file, `decrypt_tree.py`, and needs Python with the `cryptography` package. Below are
+**three options for running it. They are alternatives: choose one, any of them is enough.** All of them are
+run from the directory that holds `key.bckey` and the encrypted folder, which is why the examples refer to
+the script by its path rather than copying it next to the data.
+
+In every example, `--dry-run` only resolves the names and prints the plan; drop it to decrypt. The encrypted
+root folder is given as the last argument, here `倐姁宸壮凕娗吓墭塽堦䃸`.
+
+### Option A: `uv`
+
+[`uv`](https://docs.astral.sh/uv/) reads the dependency declaration embedded at the top of the script, sets up
+an isolated environment on first use, and runs it. Nothing to install besides `uv` itself.
 
 ```sh
-# plan only: resolves every name, decrypts nothing
-nix run github:taglia/boxcryptor-recovery -- --dry-run '倐姁宸壮凕娗吓墭塽堦䃸'
+uv run /path/to/boxcryptor-recovery/decrypt_tree.py --dry-run '倐姁宸壮凕娗吓墭塽堦䃸'
+uv run /path/to/boxcryptor-recovery/decrypt_tree.py '倐姁宸壮凕娗吓墭塽堦䃸'
+```
 
-# decrypt into a sibling folder named with the decrypted root name
+`pipx run /path/to/decrypt_tree.py …` works the same way if you have `pipx` instead.
+
+### Option B: plain Python and a virtual environment
+
+Any Python 3.10+ you already have. Create the environment once, anywhere outside the data directory:
+
+```sh
+python3 -m venv ~/bcrec-venv
+~/bcrec-venv/bin/pip install cryptography
+
+~/bcrec-venv/bin/python -I /path/to/boxcryptor-recovery/decrypt_tree.py --dry-run '倐姁宸壮凕娗吓墭塽堦䃸'
+~/bcrec-venv/bin/python -I /path/to/boxcryptor-recovery/decrypt_tree.py '倐姁宸壮凕娗吓墭塽堦䃸'
+```
+
+On Windows use `py -m venv`, `bcrec-venv\Scripts\pip`, and `bcrec-venv\Scripts\python` instead.
+
+### Option C: Nix
+
+If you use Nix with flakes, the repository is also a flake that pins the interpreter and the library exactly.
+No clone needed:
+
+```sh
+nix run github:taglia/boxcryptor-recovery -- --dry-run '倐姁宸壮凕娗吓墭塽堦䃸'
 nix run github:taglia/boxcryptor-recovery -- '倐姁宸壮凕娗吓墭塽堦䃸'
 ```
 
-Without Nix:
+Refer to the flake by its GitHub URL or by a path that contains only the repository, never by a path that
+also contains your key or your data (see [Where to keep the key](#where-to-keep-the-key)).
 
-```sh
-python3 -I /path/to/boxcryptor-recovery/decrypt_tree.py --dry-run '<encrypted root dir>'
-```
+### What happens next
 
 The decrypted tree appears next to the encrypted one. Files you already decrypted are skipped on a rerun, so
 an interrupted run can simply be restarted. Options:
@@ -105,8 +141,12 @@ Boxcryptor 2.47 Windows client and re-implemented from scratch here. No vendor c
 
 ## Tests
 
+With any of the three setups above, from the repository root:
+
 ```sh
-nix develop -c python3 -I -m unittest discover -s tests -v
+uv run --with cryptography python -I -m unittest discover -s tests -v     # uv
+~/bcrec-venv/bin/python -I -m unittest discover -s tests -v              # venv
+nix develop -c python3 -I -m unittest discover -s tests -v               # nix
 ```
 
 The tests use the public Base4K test vectors and synthetic vaults built with freshly generated keys; no real
