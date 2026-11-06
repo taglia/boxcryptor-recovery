@@ -119,6 +119,17 @@ an interrupted run can simply be restarted. Options:
 The console shows a scan counter, then a progress bar by file count with bytes, throughput and ETA.
 A per-file log is written to `<decrypted root>/_boxcryptor_decrypt.log`.
 
+A few rules keep the output tree sane:
+
+- Every directory is recreated, empty ones included, and files that are not `.bc` (for example `desktop.ini`)
+  are copied unchanged. `FolderKey.bch` files are not copied: they contain no data.
+- A decrypted name is used as a single path component: path separators, control characters and names such as
+  `..` or `CON` are neutralised with `_`, so a crafted vault cannot write outside the destination.
+- A directory whose name does not decrypt keeps its name as is, `.bc` suffix included. A file whose name does
+  not decrypt keeps its name minus the `.bc` suffix (filename encryption was optional in Boxcryptor).
+- Two entries whose names decrypt to the same thing, or differ only by case, would collide on macOS and
+  Windows: the second one gets a `~` appended and the rename is logged. Nothing is silently overwritten.
+
 ### Performance
 
 Decryption itself runs at several hundred MB/s per core. Over a network share the limit is the per-file

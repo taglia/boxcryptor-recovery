@@ -51,6 +51,7 @@ import hmac as _hmac
 import json
 import os
 import shutil
+import stat
 import struct
 import sys
 import time
@@ -261,9 +262,21 @@ def encrypt_name(plain, fn_key, user_id, legacy=True):
     return base4k_encode(bytes([1, key_holder_hash(user_id)]) + mac5 + c, legacy=legacy)
 
 
+_UNSAFE_CHARS = set("/\\\0") | {chr(c) for c in range(32)}
+_WINDOWS_RESERVED = ({"CON", "PRN", "AUX", "NUL"} | {"COM%d" % i for i in range(1, 10)}
+                     | {"LPT%d" % i for i in range(1, 10)})
+
+
 def sanitize(name):
-    name = name.replace("/", "_").replace("\0", "")
+    """Make a decrypted name safe to use as ONE path component on any platform.
+
+    Both separators, NUL and control characters become '_'; '', '.' and '..' and Windows reserved device names
+    (CON, NUL, COM1...) get a '_' prefix. Everything else, including Unicode, is kept as is.
+    """
+    name = "".join("_" if c in _UNSAFE_CHARS else c for c in name)
     if name in ("", ".", ".."):
+        name = "_" + name
+    if name.split(".")[0].upper() in _WINDOWS_RESERVED:
         name = "_" + name
     return name
 
@@ -418,13 +431,25 @@ def main():
     password = None
     uid = user["id"]
 
-    def name_of(encoded):
-        """on-disk name -> (plaintext name, ok). Keeps '~$' prefix, strips '.bc'."""
-        prefix, core, suffix = "", encoded, ""
+    def name_of(encoded, is_dir=False):
+        """on-disk name -> (plaintext name, ok).
+
+        Files: the '~$' prefix (Office lock files) is kept, the '.bc' suffix is stripped, the rest is decrypted.
+        Directories: the whole name is decrypted; one that does not decrypt is kept UNCHANGED, so a plain
+        folder that happens to be called 'archives.bc' stays 'archives.bc'.
+        """
+        if is_dir:
+            if fn_key is not None:
+                try:
+                    return sanitize(decrypt_name(encoded, fn_key, uid)), True
+                except (Base4KError, NameError_, UnicodeDecodeError):
+                    pass
+            return encoded, False
+        prefix, core = "", encoded
         if core.startswith("~$"):
             prefix, core = "~$", core[2:]
         if core.endswith(BC_EXT):
-            suffix, core = BC_EXT, core[:-len(BC_EXT)]
+            core = core[:-len(BC_EXT)]
         if fn_key is not None:
             try:
                 return prefix + sanitize(decrypt_name(core, fn_key, uid)), True
@@ -432,13 +457,40 @@ def main():
                 pass
         return prefix + core, False     # not an encrypted name (or filename encryption off): keep, minus .bc
 
-    root_name, ok = name_of(os.path.basename(src_root))
+    root_name, ok = name_of(os.path.basename(src_root), is_dir=True)
     if not ok:
         root_name += "_decrypted"
     dest_parent = os.path.abspath(a.dest_parent) if a.dest_parent else os.path.dirname(src_root)
     dest_root = os.path.join(dest_parent, root_name)
     if os.path.realpath(dest_root).startswith(os.path.realpath(src_root) + os.sep) or os.path.realpath(dest_root) == os.path.realpath(src_root):
         sys.exit("destination would be inside the source tree")
+
+    claimed = {dest_root.casefold()}     # destination paths handed out in this run, compared case-insensitively
+    collisions = []
+
+    def claim(path, is_dir=False):
+        """Reserve a destination path, making it unique within this run.
+
+        Two source entries whose names decrypt to the same thing (or differ only by case, which collides on
+        macOS and Windows) would otherwise silently overwrite each other: the later one gets '~' appended.
+        A name already taken on disk by the other kind of entry (file vs directory) is treated the same way.
+        The walk is sorted, so the mapping is the same on every run and resuming still works.
+        """
+        def kind(p):                 # None: absent, True: directory, False: something else (one stat call)
+            try:
+                return stat.S_ISDIR(os.stat(p).st_mode)
+            except OSError:
+                return None
+
+        cand = path
+        while cand.casefold() in claimed or kind(cand) not in (None, is_dir):
+            cand += "~"
+        if not (os.path.normpath(cand) + os.sep).startswith(dest_root + os.sep):
+            sys.exit("internal error: %r resolves outside the destination tree" % cand)
+        claimed.add(cand.casefold())
+        if cand != path:
+            collisions.append((path, cand))
+        return cand
 
     if not a.dry_run:
         os.makedirs(dest_root, mode=0o700, exist_ok=True)
@@ -478,12 +530,9 @@ def main():
             dirs.sort(); files.sort()
             dcur = dir_map[cur]
             for d in dirs:
-                dn, ok = name_of(d)
+                dn, ok = name_of(d, is_dir=True)
                 bad_names += 0 if ok else 1
-                target = os.path.join(dcur, dn)
-                while target in dir_map.values() or (os.path.exists(target) and not os.path.isdir(target)):
-                    target += "~"
-                dir_map[os.path.join(cur, d)] = target
+                dir_map[os.path.join(cur, d)] = claim(os.path.join(dcur, dn), is_dir=True)
             for fnm in files:
                 sp = os.path.join(cur, fnm)
                 scanned[0] += 1
@@ -492,10 +541,10 @@ def main():
                 if not fnm.endswith(BC_EXT):
                     if os.path.islink(sp):
                         skipped.append((sp, "symlink")); continue
-                    dp = os.path.join(dcur, name_of(fnm)[0])
                     if a.no_copy_plain:
-                        skipped.append((sp, "not .bc"))
-                    elif not a.overwrite and plain_dest_size(dp) == os.path.getsize(sp):
+                        skipped.append((sp, "not .bc")); continue
+                    dp = claim(os.path.join(dcur, name_of(fnm)[0]))
+                    if not a.overwrite and plain_dest_size(dp) == os.path.getsize(sp):
                         skipped.append((sp, "already decrypted (size matches)"))
                     else:
                         plain_copies.append((sp, dp))
@@ -525,7 +574,7 @@ def main():
             if efk is None:
                 skipped.append((sp, "no file key for this user")); continue
             plain_len = max(0, size - offset) - cpad
-            dp = os.path.join(dcur, dn)
+            dp = claim(os.path.join(dcur, dn))
             if not a.overwrite and plain_dest_size(dp) == plain_len:
                 skipped.append((sp, "already decrypted (size matches)")); continue
             total_bytes += plain_len
@@ -535,11 +584,14 @@ def main():
                 scan_bar("resolving names %d/%d" % (i, len(pending)))
     log.end_bar()
     log("scanned: %d files in %.0fs" % (scanned[0], time.time() - t_scan))
-    log("found  : %d .bc files to decrypt (%s), %d plain files to copy, %d skipped, %d undecryptable names, %d dirs"
-        % (len(tasks), fmt(total_bytes), len(plain_copies), len(skipped), bad_names, len(dir_map)))
+    log("found  : %d .bc files to decrypt (%s), %d plain files to copy, %d skipped, %d undecryptable names, "
+        "%d name collisions, %d dirs"
+        % (len(tasks), fmt(total_bytes), len(plain_copies), len(skipped), bad_names, len(collisions), len(dir_map)))
     for sp, why in skipped:
         if "already decrypted" not in why:
             log("skip   : %s  (%s)" % (os.path.relpath(sp, src_root), why))
+    for wanted, got in collisions:
+        log("rename : %s  ->  %s  (name collision)" % (os.path.relpath(wanted, dest_root), os.path.relpath(got, dest_root)))
     if a.dry_run:
         for s, d in sorted(dir_map.items()):
             log("dir    : %s  ->  %s" % (os.path.relpath(s, os.path.dirname(src_root)), os.path.relpath(d, dest_parent)))

@@ -65,5 +65,26 @@ class NameCipherTests(unittest.TestCase):
             D.decrypt_name(D.base4k_encode(bytes(raw)), self.key, self.uid)
 
 
+class SanitizeTests(unittest.TestCase):
+    def test_separators_control_chars_and_dots(self):
+        self.assertEqual(D.sanitize("a/b"), "a_b")
+        self.assertEqual(D.sanitize("a\\b"), "a_b")
+        self.assertEqual(D.sanitize("../etc/passwd"), ".._etc_passwd")
+        self.assertEqual(D.sanitize(".."), "_..")
+        self.assertEqual(D.sanitize("."), "_.")
+        self.assertEqual(D.sanitize(""), "_")
+        self.assertEqual(D.sanitize("a\x00b\x1fc"), "a_b_c")
+
+    def test_windows_reserved_names(self):
+        self.assertEqual(D.sanitize("CON"), "_CON")
+        self.assertEqual(D.sanitize("nul.txt"), "_nul.txt")
+        self.assertEqual(D.sanitize("COM1"), "_COM1")
+        self.assertEqual(D.sanitize("console.txt"), "console.txt")
+
+    def test_ordinary_names_untouched(self):
+        for name in ["Normal name (1).txt", "ünïcödé 日本.pdf", "~$lock.docx", "a.b.c", "archives.bc"]:
+            self.assertEqual(D.sanitize(name), name)
+
+
 if __name__ == "__main__":
     unittest.main()

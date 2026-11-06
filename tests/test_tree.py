@@ -139,6 +139,20 @@ class TreeTests(unittest.TestCase):
         with open(os.path.join(root, sub_enc, "desktop.ini"), "wb") as f:
             f.write(b"[plain]\n")
         self.expected[os.path.join(root_plain, sub_plain, "desktop.ini")] = b"[plain]\n"
+        # an empty folder: must be recreated
+        os.makedirs(os.path.join(root, self.v.enc_name("Empty folder")))
+        # a plain (unencrypted) folder whose name ends in .bc: must keep its name
+        os.makedirs(os.path.join(root, "archives.bc"))
+        self.v.container(os.path.join(root, "archives.bc", self.v.enc_name("inside.txt") + ".bc"),
+                         self.v.enc_name("inside.txt"), b"inside a plain-named folder\n")
+        self.expected[os.path.join(root_plain, "archives.bc", "inside.txt")] = b"inside a plain-named folder\n"
+        # a traversal attempt hidden in an encrypted name: must land inside the destination
+        self.v.container(os.path.join(root, self.v.enc_name("../../escaped.txt") + ".bc"),
+                         self.v.enc_name("../../escaped.txt"), b"must stay inside")
+        self.expected[os.path.join(root_plain, ".._.._escaped.txt")] = b"must stay inside"
+        # two names differing only by case: a collision on macOS/Windows, so one of them gets a '~' suffix
+        for n, data in (("Same.txt", b"UPPER"), ("same.txt", b"lower")):
+            self.v.container(os.path.join(root, self.v.enc_name(n) + ".bc"), self.v.enc_name(n), data)
         self.root = root
         self.root_plain = root_plain
 
@@ -168,10 +182,26 @@ class TreeTests(unittest.TestCase):
         self.assertFalse(any(n.endswith(".bch") for _, _, fs in os.walk(out_root) for n in fs))
         self.assertTrue(os.path.isfile(os.path.join(out_root, "_boxcryptor_decrypt.log")))
         self.assertIn("0 failures", r.stdout)
-        # second run: everything is skipped
+        self.assertTrue(os.path.isdir(os.path.join(out_root, "Empty folder")))
+        self.assertTrue(os.path.isdir(os.path.join(out_root, "archives.bc")))
+        self.assertFalse(os.path.exists(os.path.join(out_root, "archives")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "escaped.txt")))
+        # the case collision: both files written, the second one (in walk order) with a '~' suffix
+        same = sorted(n for n in os.listdir(out_root) if n.lower().startswith("same.txt"))
+        self.assertEqual(len(same), 2, same)
+        self.assertEqual(sum(n.endswith("~") for n in same), 1, same)
+        contents = set()
+        for n in same:
+            with open(os.path.join(out_root, n), "rb") as f:
+                contents.add(f.read())
+        self.assertEqual(contents, {b"UPPER", b"lower"})
+        self.assertIn("1 name collisions", r.stdout)
+        self.assertIn("(name collision)", r.stdout)
+        # second run: everything is skipped, the collision resolves the same way
         r2 = self.run_tool()
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
         self.assertIn("found  : 0 .bc files to decrypt", r2.stdout)
+        self.assertEqual(sorted(n for n in os.listdir(out_root) if n.lower().startswith("same.txt")), same)
 
     def test_wrong_password_is_rejected(self):
         with open(os.path.join(self.tmp, "pass.txt"), "w") as f:
